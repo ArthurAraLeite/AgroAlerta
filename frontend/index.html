@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agroalerta</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+    body { background-color: #f4f6f8; padding: 16px; color: #222; }
+    .container { max-width: 480px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    h1 { font-size: 1.4rem; margin-bottom: 16px; text-align: center; color: #2e7d32; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+    .card { background: #eef2f5; padding: 10px; border-radius: 6px; border-left: 4px solid #2e7d32; }
+    .card-label { font-size: 0.75rem; color: #555; text-transform: uppercase; }
+    .card-value { font-size: 1.1rem; font-weight: bold; margin-top: 4px; display: block; }
+    .form-group { margin-bottom: 16px; }
+    label { font-size: 0.85rem; font-weight: bold; display: block; margin-bottom: 4px; }
+    input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
+    button { width: 100%; padding: 14px; background: #2e7d32; color: #fff; border: none; border-radius: 6px; font-size: 1rem; font-weight: bold; cursor: pointer; }
+    button:active { background: #1b5e20; }
+    #status { margin-top: 14px; text-align: center; font-size: 0.9rem; font-weight: bold; color: #444; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Agroalerta — Solo</h1>
+
+    <div class="grid">
+      <div class="card"><span class="card-label">pH do Solo</span><span id="ph" class="card-value">--</span></div>
+      <div class="card"><span class="card-label">Condutividade (EC)</span><span id="condutividade" class="card-value">--</span></div>
+      <div class="card"><span class="card-label">Nitrogênio (N)</span><span id="nitrogenio" class="card-value">--</span></div>
+      <div class="card"><span class="card-label">Fósforo (P)</span><span id="fosforo" class="card-value">--</span></div>
+      <div class="card"><span class="card-label">Potássio (K)</span><span id="potassio" class="card-value">--</span></div>
+      <div class="card"><span class="card-label">Temperatura</span><span id="temperatura" class="card-value">--</span></div>
+      <div class="card"><span class="card-label">Umidade</span><span id="umidade" class="card-value">--</span></div>
+      <div class="card"><span class="card-label">Penetrômetro</span><span id="penetrometro" class="card-value">--</span></div>
+    </div>
+
+    <div class="form-group">
+      <label for="chat-id">ID do Telegram:</label>
+      <input type="text" id="chat-id" placeholder="Ex: 7858612258">
+    </div>
+
+    <button id="btn-enviar">Enviar para análise</button>
+    <p id="status">Aguardando leitura do sensor...</p>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    async function buscarDados() {
+  try {
+    const res = await fetch("http://localhost:5000/dados");
+    const dados = await res.json();
+
+    document.getElementById("ph").textContent = dados.ph ?? "--";
+    document.getElementById("umidade").textContent = dados.umidade ?? "--";
+    document.getElementById("nitrogenio").textContent = dados.nitrogenio ?? "--";
+    document.getElementById("fosforo").textContent = dados.fosforo ?? "--";
+    document.getElementById("potassio").textContent = dados.potassio ?? "--";
+    document.getElementById("condutividade").textContent = dados.condutividade ?? "--";
+    document.getElementById("temperatura").textContent = dados.temperatura ?? "--";
+    document.getElementById("penetrometro").textContent = dados.penetrometro ?? "--";
+  } catch (e) {
+    document.getElementById("status").textContent = "Erro ao ler sensor.";
+  }
+}
+
+buscarDados();
+// Carrega chat_id salvo
+const inputChatId = document.getElementById("chat-id");
+const chatIdSalvo = localStorage.getItem("chat_id");
+if (chatIdSalvo) inputChatId.value = chatIdSalvo;
+
+// Salva chat_id quando o usuário digitar
+inputChatId.addEventListener("change", () => {
+  localStorage.setItem("chat_id", inputChatId.value);
+});
+
+// Fila de envio offline
+function salvarNaFila(payload) {
+  const fila = JSON.parse(localStorage.getItem("fila_envio") || "[]");
+  fila.push(payload);
+  localStorage.setItem("fila_envio", JSON.stringify(fila));
+}
+
+// Botão principal
+document.getElementById("btn-enviar").addEventListener("click", async () => {
+  const status = document.getElementById("status");
+  const chat_id = inputChatId.value.trim();
+
+  if (!chat_id) {
+    status.textContent = "Informe seu ID do Telegram primeiro.";
+    return;
+  }
+
+  localStorage.setItem("chat_id", chat_id);
+
+  const payload = {
+    chat_id,
+    ph: document.getElementById("ph").textContent,
+    umidade: document.getElementById("umidade").textContent,
+    nitrogenio: document.getElementById("nitrogenio").textContent,
+    fosforo: document.getElementById("fosforo").textContent,
+    potassio: document.getElementById("potassio").textContent,
+    condutividade: document.getElementById("condutividade").textContent,
+    temperatura: document.getElementById("temperatura").textContent,
+    penetrometro: document.getElementById("penetrometro").textContent,
+  };
+
+  try {
+    await enviarBackend(payload);
+    status.textContent = "Enviado com sucesso!";
+  } catch {
+    salvarNaFila(payload);
+    status.textContent = "Sem conexão. Salvo — será enviado quando houver sinal.";
+  }
+});
+
+async function tentarEnviarFila() {
+  const fila = JSON.parse(localStorage.getItem("fila_envio") || "[]");
+  if (fila.length === 0) return;
+
+  const novaFila = [];
+  for (const payload of fila) {
+    try {
+      await enviarBackend(payload);
+    } catch {
+      novaFila.push(payload); // falhou, mantém na fila
+    }
+  }
+  localStorage.setItem("fila_envio", JSON.stringify(novaFila));
+}
+
+async function enviarBackend(payload) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/leituras`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Prefer": "return=minimal"
+    },
+    body: JSON.stringify({
+      chat_id: payload.chat_id,
+      ph: parseFloat(payload.ph),
+      umidade: parseFloat(payload.umidade),
+      nitrogenio: parseFloat(payload.nitrogenio),
+      fosforo: parseFloat(payload.fosforo),
+      potassio: parseFloat(payload.potassio),
+      condutividade: parseFloat(payload.condutividade),
+      temperatura: parseFloat(payload.temperatura),
+      compactacao: parseFloat(payload.penetrometro)
+    })
+  });
+  if (!res.ok) throw new Error("Falha no envio");
+}
+
+// Tenta esvaziar a fila quando a página carrega
+tentarEnviarFila();
+  </script>
+</body>
+</html>
